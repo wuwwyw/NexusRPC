@@ -1,0 +1,14 @@
+# Local tests and etcd data
+/test/
+*.etcd/
+
+# Local editor configuration
+/.vscode/
+/.clangd
+
+# Build and example outputs
+/build/
+*.o
+*.d
+/rpc-demo-server
+/rpc-demo-client

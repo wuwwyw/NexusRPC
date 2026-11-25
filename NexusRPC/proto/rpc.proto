@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package nexus_rpc;
+
+message Rpc_request {
+    string service = 1;
+    string method = 2;
+    bytes payload = 3;
+}
+
+message Rpc_response {
+    int32 status = 1;
+    string error_message = 2;
+    bytes payload = 3;
+}
