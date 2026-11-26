@@ -313,13 +313,11 @@ private:
     }
 
     void create_methods() {
-        // 还没写具体业务，暂时先这样
-        _methods["service"]["test"] = [](const std::string& payload, nexus_rpc::Rpc_response& response) {
-            response.set_status(0);
-            response.set_payload(payload);
-        };
-        // 之后改成调用Register
-        // Register(const std::string &service, const std::string &method, handler &work)
+        // echo示例
+        // _methods["service"]["test"] = [](const std::string& payload, nexus_rpc::Rpc_response& response) {
+        //     response.set_status(0);
+        //     response.set_payload(payload);
+        // };
     }
 
     void Delete(int client_fd, const std::shared_ptr<Rpc_receiver> &client) {
