@@ -19,69 +19,47 @@ NexusIM RPC 是一个面向即时通信系统内部微服务的 C++17 RPC 工具
 | [`NexusRPC/proto/`](NexusRPC/proto/) | Protobuf 定义及生成的 C++ 代码 |
 | [`Tcp_IO/`](Tcp_IO/) | TCP socket、地址、`epoll` 和非阻塞收发 |
 | [`common/`](common/) | etcd 注册与发现、工作线程池、日志和配置 |
+| [`examples/echo/`](examples/echo/) | 可独立运行的 Echo 服务端和客户端 |
 
 ## 环境和依赖
 
 - Linux，已在 WSL Ubuntu 22.04 上验证。网络层依赖 Linux 的 `epoll`。
-- 支持 C++17 的编译器，例如 `g++`。
-- Protobuf C++、etcd-cpp-apiv3、cpprestsdk、spdlog 和 fmt 的开发头文件及库。下方命令假设编译器和链接器能从系统路径找到它们；etcd-cpp-apiv3 的链接库名是 `etcd-cpp-api`。
+- CMake 3.16 或以上，以及支持 C++17 的编译器，例如 `g++`。
+- Protobuf C++、etcd-cpp-apiv3、cpprestsdk、spdlog 和 fmt 的开发头文件及库。CMake 需要能找到 `Protobuf`、`etcd-cpp-api` 和 `spdlog`，并解析它们的依赖。
 - 可连接的 etcd 实例。默认地址为 `http://127.0.0.1:2379`，注册前缀为 `/NexusiM/test/`，都在 [`common/Config.hpp`](common/Config.hpp) 中配置。
 
-如果本地还没启动 etcd，可以在一个 WSL 终端用临时数据目录启动它：
+## 运行 Echo 示例
+
+[服务端](examples/echo/echo_server.cpp)通过 `register_method()` 注册 `service/echo`，原样返回请求正文。[客户端](examples/echo/echo_client.cpp)通过 etcd 找到服务端，发送 `hello` 并检查响应。
+
+**1. 编译动态库和示例。** 在仓库根目录执行：
+
+```bash
+cmake -S . -B build -DNEXUS_RPC_BUILD_EXAMPLES=ON
+cmake --build build --parallel
+```
+
+构建完成后，动态库位于 `build/libnexus_rpc.so`，示例程序位于 `build/examples/echo/`。
+
+**2. 启动 etcd。** 如果 `127.0.0.1:2379` 上还没有 etcd，在单独的终端执行以下命令，并保持它运行：
 
 ```bash
 etcd --data-dir "$(mktemp -d)"
 ```
 
-## 最小示例
-
-下面的示例使用服务端内置的 `service/test` 方法，它会原样返回请求正文。分别将以下两段保存为 `server.cpp` 和 `client.cpp`。
-
-`server.cpp`
-
-```cpp
-#include "NexusRPC/Rpc_server.hpp"
-
-int main() {
-    Rpc_server server("127.0.0.1", 19090, prefix + "service/node-19090");
-    server.run();
-}
-```
-
-`client.cpp`
-
-```cpp
-#include "NexusRPC/Rpc_uesr.hpp"
-#include <iostream>
-
-int main() {
-    Rpc_user client;
-    nexus_rpc::Rpc_response response;
-    Rpc_error error = Rpc_error::NONE;
-
-    if (!client.Call("service", "test", "hello RPC", response, 3000, &error)) {
-        std::cerr << "RPC failed: " << static_cast<int>(error) << '\n';
-        return 1;
-    }
-    if (response.status() != 0) {
-        std::cerr << response.error_message() << '\n';
-        return 2;
-    }
-    std::cout << response.payload() << '\n';
-}
-```
-
-在仓库根目录执行以下编译命令。如果把示例放在其他目录，将命令中的 `server.cpp` 和 `client.cpp` 换成对应路径。
+**3. 启动服务端。** 在仓库根目录执行，保持服务端运行：
 
 ```bash
-g++ -std=c++17 -pthread -I. server.cpp NexusRPC/proto/rpc.pb.cc \
-    -letcd-cpp-api -lcpprest -lspdlog -lfmt -lprotobuf -o rpc-demo-server
-
-g++ -std=c++17 -pthread -I. client.cpp NexusRPC/proto/rpc.pb.cc \
-    -letcd-cpp-api -lcpprest -lspdlog -lfmt -lprotobuf -o rpc-demo-client
+./build/examples/echo/echo_server
 ```
 
-在 etcd 启动后，先运行 `./rpc-demo-server`，再在另一个终端运行 `./rpc-demo-client`。预期输出 `hello RPC`。
+**4. 运行客户端。** 在另一个终端进入仓库根目录后执行：
+
+```bash
+./build/examples/echo/echo_client
+```
+
+客户端应输出 `hello`。
 
 接入自己的处理函数时，在启动事件循环前调用 `server.register_method(service, method, handler)`。etcd 注册 key 使用 `<prefix><service>/<instance>`，其中的服务名要和 `register_method()`、`Call()` 使用的服务名一致。注册地址使用客户端可达的 `IPv4:端口`。
 
