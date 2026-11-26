@@ -43,6 +43,11 @@ public:
             exit(1);
         }
 
+        if ((_stop_eventfd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)) < 0) {
+            LOG_CRIT("stop_eventfd create fail");
+            exit(1);
+        }
+
         if (!_epoll.add(_socket.get_fd(), EPOLLIN)) {
             LOG_CRIT("server sockfd join epoll failed, fd = {}", _socket.get_fd());
             exit(1);
@@ -58,12 +63,26 @@ public:
             exit(1);
         }
 
+        if (!_epoll.add(_stop_eventfd, EPOLLIN)) {
+            LOG_CRIT("stop_eventfd join epoll failed, fd = {}", _quit_eventfd);
+            exit(1);
+        }
+
         if (!create_service(ip, port, key)) {
             LOG_CRIT("create service failed");
             exit(1);
         }
         
         create_methods();
+    }
+
+    ~Rpc_server() {
+        close(_del_eventfd);
+        {
+            std::lock_guard<std::mutex> lock(_mutex_quit);
+            close(_quit_eventfd);
+        }
+        close(_stop_eventfd);
     }
 
     void run() {
@@ -76,6 +95,14 @@ public:
 
                 LOG_ERROR("epoll wait failed: {}", strerror(errno));
                 return;
+            }
+
+            for (int i = 0; i < n; ++i) {
+                if (events[i].data.fd == _stop_eventfd && (events[i].events & EPOLLIN)) {
+                    std::lock_guard<std::mutex> lock(_mutex_quit);
+                    _stop = true;
+                    return;
+                }
             }
 
             for (int i = 0; i < n; i++) {
@@ -154,7 +181,7 @@ public:
 
                         judgeANDset_mod(client, client_fd);
                     }
-                } else {
+                } else if (fd != _stop_eventfd) {
                     auto it = _receivers.find(fd);
                     if (it == _receivers.end()) continue;
 
@@ -267,6 +294,18 @@ public:
         return true;
     }
 
+    bool request_stop() noexcept {
+        const uint64_t one = 1;
+        ssize_t n;
+
+        do {
+            n = write(_stop_eventfd, &one, sizeof(one));
+        } while (n < 0 && errno == EINTR);
+
+        if (n == sizeof(one)) return true;
+        return n < 0 && errno == EAGAIN;
+    }
+
 private:
     bool create_service(const std::string &ip, uint64_t port, const std::string &key) {
         std::string val = ip + ":" + std::to_string(port);
@@ -341,10 +380,11 @@ private:
 
     void quit(int client_fd, const std::shared_ptr<Rpc_receiver> &client) {
         std::lock_guard<std::mutex> lock(_mutex_quit);
-        _quit[client_fd] = client;
+        if (_stop) return;
 
+        _quit[client_fd] = client;
         uint64_t val = 1;
-        write(_quit_eventfd, &val, sizeof(int64_t));
+        write(_quit_eventfd, &val, sizeof(val));
     }
 
     bool try_dispatch(int client_fd, const std::shared_ptr<Rpc_receiver> &client) {
@@ -461,6 +501,8 @@ private:
     Epoller _epoll;
     int _del_eventfd;
     int _quit_eventfd;
+    int _stop_eventfd;
+    bool _stop = false;
     std::mutex _mutex_del;
     std::mutex _mutex_quit;
     std::mutex _mutex_in;
