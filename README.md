@@ -22,7 +22,6 @@ NexusIM RPC 是一个面向即时通信系统内部微服务的 C++17 RPC 工具
 | [`Tcp_IO/`](Tcp_IO/) | TCP socket、地址、`epoll` 和非阻塞收发 |
 | [`common/`](common/) | etcd 注册与发现、工作线程池、日志和配置 |
 | [`examples/echo/`](examples/echo/) | 可独立运行的 Echo 服务端和客户端 |
-| [`test/`](test/) | RPC 收发、服务发现与故障恢复测试 |
 
 ## 环境和依赖
 
@@ -66,16 +65,6 @@ etcd --data-dir "$(mktemp -d)"
 
 接入自己的处理函数时，先调用 `server.register_method(service, method, handler)`，再调用 `server.loop()` 启动主事件循环。etcd 注册 key 使用 `<prefix><service>/<instance>`，其中的服务名要和 `register_method()`、`Call()` 使用的服务名一致。注册地址使用客户端可达的 `IPv4:端口`。
 
-## 运行回归测试
-
-在 Linux 或 WSL 的仓库根目录执行：
-
-```bash
-python3 test/run_rpc_recovery.py
-```
-
-脚本使用 `g++` 编译测试程序，并自行启动临时 etcd 和 RPC 服务端。运行前确保本机安装了 `etcd`，且 `2379`、`2380`、`19090` 和 `19091` 端口空闲。用例覆盖分包与粘包、连接复用、慢请求期间其他连接仍可响应、半关闭、读暂停与恢复、多实例上下线，以及租约失效和 etcd 重启后的恢复。
-
 ## 开发状态
 
-当前版本面向可信内网中的 Linux C++ 服务间调用。独立 Echo 示例、多 Reactor 连接分流和停机流程，以及上述回归场景均已在 WSL 验证。
+当前版本面向可信内网中的 Linux C++ 服务间调用。独立 Echo 示例、多 Reactor 连接分流和停机流程已在 WSL 验证。
