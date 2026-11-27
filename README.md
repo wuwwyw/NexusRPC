@@ -1,25 +1,28 @@
 # NexusIM RPC
 
-NexusIM RPC 是一个面向即时通信系统内部微服务的 C++17 RPC 工具。客户端通过 etcd 发现服务实例，再通过 TCP 发送请求并接收响应。服务端使用 Linux `epoll` 管理连接，由工作线程执行处理函数。消息使用 Protobuf 编码。
+NexusIM RPC 是一个面向即时通信系统内部微服务的 C++17 RPC 工具。客户端通过 etcd 发现服务实例，通过 TCP 发送请求并接收响应。服务端采用基于 Linux `epoll` 的多 Reactor 模型，消息使用 Protobuf 编码。
 
 ## 已实现
 
 - **请求与响应**：TCP 长连接、自定义帧头、分包与粘包处理，以及通过 `request_id` 匹配响应。
-- **服务端**：处理函数注册、工作线程执行、按连接管理收发状态。慢处理函数不会占住整个网络事件循环。
+- **服务端**：主 Reactor 接收新连接并按轮询分发，子 Reactor 各自使用 `epoll` 管理分配到的连接。工作线程执行处理函数，完成后通过 `eventfd` 通知连接所属的子 Reactor 发送响应。支持读暂停与恢复，以及 TCP 半关闭后的响应发送。
 - **客户端**：同步 `Call()`、按实例地址预建和复用连接、借出时检查连接，以及失败后的重连。
 - **服务发现**：etcd 快照与 Watch 衔接、地址校验、实例下线回收空闲连接，以及租约失效后的重新注册。
 
 当前同一个 `Rpc_user` 实例按串行调用使用。RPC 正文上限为 1 MiB，包含序列化后的请求或响应字段。已经开始发送的请求遇到超时或断线时，由调用方决定是否重试。
 
+服务端默认启动 4 个子 Reactor，数量由 [`common/Config.hpp`](common/Config.hpp) 中的 `reactor_num` 控制，修改后需重新编译。调用 `request_stop()` 可唤醒主循环并退出 `loop()`。销毁服务端时会唤醒并等待各子 Reactor 退出，尚未发出的响应可能被丢弃。
+
 ## 目录
 
 | 路径 | 内容 |
 | --- | --- |
-| [`NexusRPC/`](NexusRPC/) | RPC 服务端、客户端、协议、连接池和服务表 |
+| [`NexusRPC/`](NexusRPC/) | RPC 服务端、子 Reactor（`Rpc_loop.hpp`）、客户端、协议、连接池和服务表 |
 | [`NexusRPC/proto/`](NexusRPC/proto/) | Protobuf 定义及生成的 C++ 代码 |
 | [`Tcp_IO/`](Tcp_IO/) | TCP socket、地址、`epoll` 和非阻塞收发 |
 | [`common/`](common/) | etcd 注册与发现、工作线程池、日志和配置 |
 | [`examples/echo/`](examples/echo/) | 可独立运行的 Echo 服务端和客户端 |
+| [`test/`](test/) | RPC 收发、服务发现与故障恢复测试 |
 
 ## 环境和依赖
 
@@ -61,8 +64,18 @@ etcd --data-dir "$(mktemp -d)"
 
 客户端应输出 `hello`。
 
-接入自己的处理函数时，在启动事件循环前调用 `server.register_method(service, method, handler)`。etcd 注册 key 使用 `<prefix><service>/<instance>`，其中的服务名要和 `register_method()`、`Call()` 使用的服务名一致。注册地址使用客户端可达的 `IPv4:端口`。
+接入自己的处理函数时，先调用 `server.register_method(service, method, handler)`，再调用 `server.loop()` 启动主事件循环。etcd 注册 key 使用 `<prefix><service>/<instance>`，其中的服务名要和 `register_method()`、`Call()` 使用的服务名一致。注册地址使用客户端可达的 `IPv4:端口`。
+
+## 运行回归测试
+
+在 Linux 或 WSL 的仓库根目录执行：
+
+```bash
+python3 test/run_rpc_recovery.py
+```
+
+脚本使用 `g++` 编译测试程序，并自行启动临时 etcd 和 RPC 服务端。运行前确保本机安装了 `etcd`，且 `2379`、`2380`、`19090` 和 `19091` 端口空闲。用例覆盖分包与粘包、连接复用、慢请求期间其他连接仍可响应、半关闭、读暂停与恢复、多实例上下线，以及租约失效和 etcd 重启后的恢复。
 
 ## 开发状态
 
-目前面向可信内网中的 Linux C++ 服务间调用。基础收发、连接复用、实例上下线以及 etcd 重启恢复已在 WSL 验证。连接容量、写侧积压和多实例负载下的表现留待压测。
+当前版本面向可信内网中的 Linux C++ 服务间调用。独立 Echo 示例、多 Reactor 连接分流和停机流程，以及上述回归场景均已在 WSL 验证。
