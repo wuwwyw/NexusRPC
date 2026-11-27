@@ -11,5 +11,5 @@ int main() {
         return 1;
     }
 
-    server.run();
+    server.loop();
 }
